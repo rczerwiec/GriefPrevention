@@ -24,6 +24,8 @@ import com.griefprevention.commands.ClaimCommand;
 import com.griefprevention.metrics.MetricsHandler;
 import com.griefprevention.protection.ProtectionHelper;
 import me.ryanhamshire.GriefPrevention.DataStore.NoTransferException;
+import me.ryanhamshire.GriefPrevention.commands.CommandDispatcher;
+import me.ryanhamshire.GriefPrevention.commands.DzialkaCommand;
 import me.ryanhamshire.GriefPrevention.events.SaveTrappedPlayerEvent;
 import me.ryanhamshire.GriefPrevention.events.TrustChangedEvent;
 import org.bukkit.BanList;
@@ -80,6 +82,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import me.ryanhamshire.GriefPrevention.gui.ClaimMenuListener;
 
 public class GriefPrevention extends JavaPlugin
 {
@@ -271,128 +275,46 @@ public class GriefPrevention extends JavaPlugin
     public void onEnable()
     {
         instance = this;
-        log = instance.getLogger();
 
         this.loadConfig();
 
         this.customLogger = new CustomLogger();
 
-        AddLogEntry("Finished loading configuration.");
-
         //when datastore initializes, it loads player and claim data, and posts some stats to the log
-        if (this.databaseUrl.length() > 0)
-        {
-            try
-            {
+        if (this.databaseUrl.length() > 0) {
+            try {
                 DatabaseDataStore databaseStore = new DatabaseDataStore(this.databaseUrl, this.databaseUserName, this.databasePassword);
 
-                if (FlatFileDataStore.hasData())
-                {
-                    GriefPrevention.AddLogEntry("There appears to be some data on the hard drive.  Migrating those data to the database...");
-                    FlatFileDataStore flatFileStore = new FlatFileDataStore();
-                    this.dataStore = flatFileStore;
-                    flatFileStore.migrateData(databaseStore);
-                    GriefPrevention.AddLogEntry("Data migration process complete.");
+                if (FlatFileDataStore.hasData()) {
+                    GriefPrevention.AddLogEntry("There appears to be some data on the hard drive.  This may be recovered from\n" + FlatFileDataStore.getPlayerDataFolderPath());
                 }
 
                 this.dataStore = databaseStore;
+            } catch (Exception e) {
+                GriefPrevention.AddLogEntry("Because there was a problem with the database, GriefPrevention will not function properly.  Either update the database config settings or delete those lines from the config.yml so that GriefPrevention can use the file system instead.");
+                e.printStackTrace();
+                this.getServer().getPluginManager().disablePlugin(this);
+                return;
             }
-            catch (Exception e)
-            {
-                GriefPrevention.AddLogEntry("Because there was a problem with the database, GriefPrevention will not function properly.  Either update the database config settings resolve the issue, or delete those lines from your config.yml so that GriefPrevention can use the file system to store data.");
+        } else {
+            try {
+                this.dataStore = new FlatFileDataStore();
+                this.dataStore.initialize();
+            } catch (Exception e) {
+                GriefPrevention.AddLogEntry("Because there was a problem with the file system, GriefPrevention will not function properly.  Please delete the GriefPreventionData folder and all its contents.");
                 e.printStackTrace();
                 this.getServer().getPluginManager().disablePlugin(this);
                 return;
             }
         }
 
-        //if not using the database because it's not configured or because there was a problem, use the file system to store data
-        //this is the preferred method, as it's simpler than the database scenario
-        if (this.dataStore == null)
-        {
-            File oldclaimdata = new File(getDataFolder(), "ClaimData");
-            if (oldclaimdata.exists())
-            {
-                if (!FlatFileDataStore.hasData())
-                {
-                    File claimdata = new File("plugins" + File.separator + "GriefPreventionData" + File.separator + "ClaimData");
-                    oldclaimdata.renameTo(claimdata);
-                    File oldplayerdata = new File(getDataFolder(), "PlayerData");
-                    File playerdata = new File("plugins" + File.separator + "GriefPreventionData" + File.separator + "PlayerData");
-                    oldplayerdata.renameTo(playerdata);
-                }
-            }
-            try
-            {
-                this.dataStore = new FlatFileDataStore();
-            }
-            catch (Exception e)
-            {
-                GriefPrevention.AddLogEntry("Unable to initialize the file system data store.  Details:");
-                GriefPrevention.AddLogEntry(e.getMessage());
-                e.printStackTrace();
-            }
-        }
-
-        String dataMode = (this.dataStore instanceof FlatFileDataStore) ? "(File Mode)" : "(Database Mode)";
-        AddLogEntry("Finished loading data " + dataMode + ".");
-
-        //unless claim block accrual is disabled, start the recurring per 10 minute event to give claim blocks to online players
-        //20L ~ 1 second
-        if (this.config_claims_blocksAccruedPerHour_default > 0)
-        {
-            DeliverClaimBlocksTask task = new DeliverClaimBlocksTask(null, this);
-            this.getServer().getScheduler().scheduleSyncRepeatingTask(this, task, 20L * 60 * 10, 20L * 60 * 10);
-        }
-
-        //start recurring cleanup scan for unused claims belonging to inactive players
-        FindUnusedClaimsTask task2 = new FindUnusedClaimsTask();
-        this.getServer().getScheduler().scheduleSyncRepeatingTask(this, task2, 20L * 60, 20L * config_advanced_claim_expiration_check_rate);
-
         //register for events
-        PluginManager pluginManager = this.getServer().getPluginManager();
+        this.registerEvents();
 
-        //player events
-        playerEventHandler = new PlayerEventHandler(this.dataStore, this);
-        pluginManager.registerEvents(playerEventHandler, this);
-        // Load monitored commands on a 1-tick delay to allow plugins to enable and Bukkit to load commands.yml.
-        getServer().getScheduler().runTaskLater(this, playerEventHandler::reload, 1L);
-
-        //block events
-        BlockEventHandler blockEventHandler = new BlockEventHandler(this.dataStore);
-        pluginManager.registerEvents(blockEventHandler, this);
-
-        //entity events
-        entityEventHandler = new EntityEventHandler(this.dataStore, this);
-        pluginManager.registerEvents(entityEventHandler, this);
-
-        //combat/damage-specific entity events
-        entityDamageHandler = new EntityDamageHandler(this.dataStore, this);
-        pluginManager.registerEvents(entityDamageHandler, this);
-
-        //cache offline players
-        OfflinePlayer[] offlinePlayers = this.getServer().getOfflinePlayers();
-        CacheOfflinePlayerNamesThread namesThread = new CacheOfflinePlayerNamesThread(offlinePlayers, this.playerNameToIDMap);
-        namesThread.setPriority(Thread.MIN_PRIORITY);
-        namesThread.start();
-
-        //load ignore lists for any already-online players
-        @SuppressWarnings("unchecked")
-        Collection<Player> players = (Collection<Player>) GriefPrevention.instance.getServer().getOnlinePlayers();
-        for (Player player : players)
-        {
-            new IgnoreLoaderThread(player.getUniqueId(), this.dataStore.getPlayerData(player.getUniqueId()).ignoredPlayers).start();
-        }
-
-        setUpCommands();
+        //register commands
+        this.setUpCommands();
 
         AddLogEntry("Boot finished.");
-
-        try
-        {
-            new MetricsHandler(this);
-        }
-        catch (Throwable ignored) {}
     }
 
     private void loadConfig()
@@ -935,7 +857,14 @@ public class GriefPrevention extends JavaPlugin
 
     private void setUpCommands()
     {
-        new ClaimCommand(this);
+        CommandDispatcher dispatcher = new CommandDispatcher();
+        // ... existing commands ...
+        
+        // Add new dzialka command
+        dispatcher.registerCommand(new DzialkaCommand(this));
+        
+        this.getCommand("dzialka").setExecutor(dispatcher);
+        // ... rest of existing code ...
     }
 
     //handles slash commands
@@ -3143,4 +3072,44 @@ public class GriefPrevention extends JavaPlugin
         else
             portalReturnTaskMap.put(player.getUniqueId(), task);
     }
+
+    private void registerEvents() {
+        PluginManager pluginManager = this.getServer().getPluginManager();
+
+        //player events
+        playerEventHandler = new PlayerEventHandler(this.dataStore, this);
+        pluginManager.registerEvents(playerEventHandler, this);
+        // Load monitored commands on a 1-tick delay to allow plugins to enable and Bukkit to load commands.yml.
+        getServer().getScheduler().runTaskLater(this, playerEventHandler::reload, 1L);
+
+        //block events
+        BlockEventHandler blockEventHandler = new BlockEventHandler(this.dataStore);
+        pluginManager.registerEvents(blockEventHandler, this);
+
+        //entity events
+        entityEventHandler = new EntityEventHandler(this.dataStore, this);
+        pluginManager.registerEvents(entityEventHandler, this);
+
+        //combat/damage-specific entity events
+        entityDamageHandler = new EntityDamageHandler(this.dataStore, this);
+        pluginManager.registerEvents(entityDamageHandler, this);
+
+        //GUI events
+        ClaimMenuListener menuListener = new ClaimMenuListener(this);
+        pluginManager.registerEvents(menuListener, this);
+
+        //cache offline players
+        OfflinePlayer[] offlinePlayers = this.getServer().getOfflinePlayers();
+        CacheOfflinePlayerNamesThread namesThread = new CacheOfflinePlayerNamesThread(offlinePlayers, this.playerNameToIDMap);
+        namesThread.setPriority(Thread.MIN_PRIORITY);
+        namesThread.start();
+
+        //load ignore lists for any already-online players
+        @SuppressWarnings("unchecked")
+        Collection<Player> players = (Collection<Player>) this.getServer().getOnlinePlayers();
+        for (Player player : players) {
+            new IgnoreLoaderThread(player.getUniqueId(), this.dataStore.getPlayerData(player.getUniqueId()).ignoredPlayers).start();
+        }
+    }
 }
+

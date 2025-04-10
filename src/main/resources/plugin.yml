@@ -5,6 +5,10 @@ dev-url: https://dev.bukkit.org/projects/grief-prevention
 version: '${git.commit.id.describe}'
 api-version: '1.20'
 commands:
+    dzialka:
+      description: Otwiera panel zarządzania działkami.
+      usage: /<command>
+      permission: griefprevention.claims
     abandonclaim:
       description: Deletes a claim.
       usage: /<command>

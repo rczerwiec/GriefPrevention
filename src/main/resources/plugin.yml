@@ -1,4 +1,4 @@
-name: GriefPrevention
+name: SMGriefPrevention
 main: me.ryanhamshire.GriefPrevention.GriefPrevention
 softdepend: [Multiverse-Core, My_Worlds, MystCraft, Transporter, RoyalCommands, MultiWorld, Denizen, CommandHelper]
 dev-url: https://dev.bukkit.org/projects/grief-prevention

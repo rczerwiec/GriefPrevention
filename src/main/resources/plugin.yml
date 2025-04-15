@@ -185,6 +185,11 @@ commands:
       description: Gives a player a manual about claiming land.
       usage: /<command> <player>
       permission: griefprevention.claimbook
+    giveblocks:
+      description: Natychmiast przyznaje bloki graczowi/graczom.
+      usage: /<command> [gracz]
+      permission: griefprevention.giveblocks
+      aliases: [dodajbloki, addblocks]
 permissions:
     griefprevention.createclaims:
         description: Grants permission to create claims.

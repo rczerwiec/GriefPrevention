@@ -129,6 +129,7 @@ public class GriefPrevention extends JavaPlugin
     public boolean config_claims_raidTriggersRequireBuildTrust;      //whether raids are triggered by a player that doesn't have build permission in that claim
     public int config_claims_maxClaimsPerPlayer;                    //maximum number of claims per player
     public boolean config_claims_villagerTradingRequiresTrust;      //whether trading with a claimed villager requires permission
+    public boolean config_claims_checkAfkForBlocks;                 //whether to check if player is AFK before giving blocks
 
     public int config_claims_initialBlocks;                            //the number of claim blocks a new player starts with
     public double config_claims_abandonReturnRatio;                 //the portion of claim blocks returned to a player when a claim is abandoned
@@ -486,6 +487,7 @@ public class GriefPrevention extends JavaPlugin
         this.config_claims_expirationExemptionTotalBlocks = config.getInt("GriefPrevention.Claims.Expiration.AllClaims.ExceptWhenOwnerHasTotalClaimBlocks", 10000);
         this.config_claims_expirationExemptionBonusBlocks = config.getInt("GriefPrevention.Claims.Expiration.AllClaims.ExceptWhenOwnerHasBonusClaimBlocks", 5000);
         this.config_claims_allowTrappedInAdminClaims = config.getBoolean("GriefPrevention.Claims.AllowTrappedInAdminClaims", false);
+        this.config_claims_checkAfkForBlocks = config.getBoolean("GriefPrevention.Claims.CheckAfkForBlocks", true);
 
         this.config_claims_maxClaimsPerPlayer = config.getInt("GriefPrevention.Claims.MaximumNumberOfClaimsPerPlayer", 0);
         this.config_claims_villagerTradingRequiresTrust = config.getBoolean("GriefPrevention.Claims.VillagerTradingRequiresPermission", true);
@@ -2002,6 +2004,7 @@ public class GriefPrevention extends JavaPlugin
                 GriefPrevention.sendMessage(player, TextMode.Err, Messages.TrappedWontWorkHere);
                 return true;
             }
+
             //send instructions
             GriefPrevention.sendMessage(player, TextMode.Instr, Messages.RescuePending);
 
@@ -2010,6 +2013,63 @@ public class GriefPrevention extends JavaPlugin
             this.getServer().getScheduler().scheduleSyncDelayedTask(this, task, 200L);  //20L ~ 1 second
 
             return true;
+        }
+
+        //giveblocks
+        else if (cmd.getName().equalsIgnoreCase("giveblocks"))
+        {
+            if (args.length > 0)
+            {
+                // Próba znalezienia gracza
+                Player targetPlayer = this.getServer().getPlayer(args[0]);
+                if (targetPlayer != null)
+                {
+                    // Wywołaj task dla konkretnego gracza
+                    DeliverClaimBlocksTask task = new DeliverClaimBlocksTask(targetPlayer);
+                    task.run();
+                    
+                    // Pobierz aktualną liczbę bloków
+                    PlayerData playerData = this.dataStore.getPlayerData(targetPlayer.getUniqueId());
+                    int currentBlocks = playerData.getAccruedClaimBlocks();
+                    int maxBlocks = playerData.getAccruedClaimBlocksLimit();
+                    
+                    sendMessage(player, TextMode.Success, "Przyznano bloki dla gracza " + targetPlayer.getName() + 
+                        " (obecnie ma: " + currentBlocks + "/" + maxBlocks + " bloków)");
+                }
+                else
+                {
+                    sendMessage(player, TextMode.Err, "Nie znaleziono gracza " + args[0]);
+                }
+            }
+            else
+            {
+                // Bez argumentów - wywołaj dla wszystkich graczy online
+                Collection<? extends Player> onlinePlayers = this.getServer().getOnlinePlayers();
+                int count = 0;
+                for (Player onlinePlayer : onlinePlayers)
+                {
+                    DeliverClaimBlocksTask task = new DeliverClaimBlocksTask(onlinePlayer);
+                    task.run();
+                    count++;
+                }
+                // Pokaż podsumowanie dla wszystkich graczy
+                Collection<? extends Player> players = this.getServer().getOnlinePlayers();
+                StringBuilder summary = new StringBuilder("Przyznano bloki dla " + count + " graczy online:\n");
+                for (Player p : players) {
+                    PlayerData pd = this.dataStore.getPlayerData(p.getUniqueId());
+                    summary.append("- ").append(p.getName()).append(": ")
+                           .append(pd.getAccruedClaimBlocks()).append("/")
+                           .append(pd.getAccruedClaimBlocksLimit()).append(" bloków\n");
+                }
+                sendMessage(player, TextMode.Success, summary.toString());
+            }
+            return true;
+        }
+
+        //trapped in a portal
+        else if (cmd.getName().equalsIgnoreCase("trapped") && args.length > 0 && args[0].startsWith("portal"))
+        {
+            // ... existing code ...
         }
 
         else if (cmd.getName().equalsIgnoreCase("softmute"))

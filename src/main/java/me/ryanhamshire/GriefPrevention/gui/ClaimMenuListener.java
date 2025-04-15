@@ -79,28 +79,32 @@ public class ClaimMenuListener implements Listener {
 
     private void handleTrustMenuClick(Player player, ItemStack clickedItem, boolean isRightClick) {
         if (clickedItem.getItemMeta() == null) return;
-        String itemName = clickedItem.getItemMeta().getDisplayName();
+        String itemName = ChatColor.stripColor(clickedItem.getItemMeta().getDisplayName());
 
-        if (itemName.equals(ChatColor.GREEN + "Dodaj Zaufaną Osobę")) {
+        if (itemName.equals("Dodaj Zaufaną Osobę")) {
             player.closeInventory();
             pendingActions.put(player.getUniqueId(), MenuAction.ADD_TRUST);
             player.sendMessage(ChatColor.YELLOW + "Wpisz na czacie nick gracza, którego chcesz dodać jako zaufanego.");
             player.sendMessage(ChatColor.GRAY + "Wpisz 'anuluj' aby anulować.");
         }
-        else if (itemName.equals(ChatColor.RED + "Usuń Zaufaną Osobę")) {
+        else if (itemName.equals("Usuń Zaufaną Osobę")) {
             player.closeInventory();
             pendingActions.put(player.getUniqueId(), MenuAction.REMOVE_TRUST);
             player.sendMessage(ChatColor.YELLOW + "Wpisz na czacie nick gracza, którego chcesz usunąć z zaufanych.");
             player.sendMessage(ChatColor.GRAY + "Wpisz 'anuluj' aby anulować.");
         }
-        else if (itemName.equals(ChatColor.YELLOW + "Powrót")) {
+        else if (itemName.equals("Powrót")) {
             player.closeInventory();
             claimMenu.openMenu(player);
         }
         else if (clickedItem.getType() == Material.PLAYER_HEAD && isRightClick) {
             // Usuwanie zaufanej osoby poprzez kliknięcie PPM na głowę
-            String trustedPlayer = ChatColor.stripColor(itemName);
-            handleTrustRemoval(player, trustedPlayer);
+            handleTrustRemoval(player, itemName);
+            
+            // Odśwież menu po krótkim opóźnieniu
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                claimMenu.openTrustMenu(player);
+            }, 1L);
         }
     }
 
@@ -181,19 +185,19 @@ public class ClaimMenuListener implements Listener {
             return;
         }
 
-        // Próbujemy znaleźć dokładny nick gracza
-        Player targetPlayer = Bukkit.getPlayer(targetName);
-        String exactPlayerName = targetPlayer != null ? targetPlayer.getName() : targetName;
-        
         // Usuwamy wszystkie uprawnienia
-        claim.dropPermission(exactPlayerName);
+        claim.dropPermission(targetName);
+        claim.managers.remove(targetName);
+        
+        // Używamy systemowej komendy untrust
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Bukkit.dispatchCommand(player, "untrust " + targetName);
+        });
         
         // Zapisujemy zmiany w działce
         plugin.dataStore.saveClaim(claim);
         
-        player.sendMessage(ChatColor.GREEN + "Usunięto gracza " + exactPlayerName + " z zaufanych osób.");
-        
-        Bukkit.getScheduler().runTask(plugin, () -> claimMenu.openTrustMenu(player));
+        player.sendMessage(ChatColor.GREEN + "Usunięto gracza " + targetName + " z zaufanych osób.");
     }
 
     private void handleAbandonClaim(Player player) {

@@ -366,7 +366,18 @@ public class PlayerData
 
     public void accrueBlocks(int howMany)
     {
-        this.newlyAccruedClaimBlocks += howMany;
+        if (this.accruedClaimBlocks == null) this.loadDataFromSecondaryStorage();
+        
+        int accruedLimit = this.getAccruedClaimBlocksLimit();
+        
+        // Dodajemy bloki bezpośrednio do accruedClaimBlocks
+        this.accruedClaimBlocks = Math.min(this.accruedClaimBlocks + howMany, accruedLimit);
+        
+        // Resetujemy nowo naliczone bloki
+        this.newlyAccruedClaimBlocks = 0;
+        
+        // Wymuszamy natychmiastowy zapis do bazy danych
+        GriefPrevention.instance.dataStore.savePlayerDataSync(this.playerID, this);
     }
 
     public @Nullable BoundaryVisualization getVisibleBoundaries()

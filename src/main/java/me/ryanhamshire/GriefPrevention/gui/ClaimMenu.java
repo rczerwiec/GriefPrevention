@@ -96,13 +96,6 @@ public class ClaimMenu {
                 ChatColor.GRAY + "zaufaną osobę do działki");
             trustMenu.setItem(20, addTrust);
 
-            // Przycisk usuwania zaufanej osoby
-            ItemStack removeTrust = createGuiItem(Material.REDSTONE,
-                ChatColor.RED + "Usuń Zaufaną Osobę",
-                ChatColor.GRAY + "Kliknij, aby usunąć",
-                ChatColor.GRAY + "zaufaną osobę z działki");
-            trustMenu.setItem(24, removeTrust);
-
             // Lista zaufanych osób
             ArrayList<String> builders = new ArrayList<>();
             ArrayList<String> containers = new ArrayList<>();
@@ -110,30 +103,22 @@ public class ClaimMenu {
             ArrayList<String> managers = new ArrayList<>();
             currentClaim.getPermissions(builders, containers, accessors, managers);
 
+            // Tworzymy zbiór unikalnych graczy
+            java.util.Set<String> addedPlayers = new java.util.HashSet<>();
             int slot = 9;
-            // Dodaj managerów
+
+            // Dodaj tylko managerów (mają najwyższe uprawnienia)
             for (String manager : managers) {
                 if (slot >= 36) break;
-                ItemStack playerHead = createPlayerHead(manager);
-                trustMenu.setItem(slot++, playerHead);
-            }
-            // Dodaj budowniczych
-            for (String builder : builders) {
-                if (slot >= 36) break;
-                ItemStack playerHead = createPlayerHead(builder);
-                trustMenu.setItem(slot++, playerHead);
-            }
-            // Dodaj osoby z dostępem do pojemników
-            for (String container : containers) {
-                if (slot >= 36) break;
-                ItemStack playerHead = createPlayerHead(container);
-                trustMenu.setItem(slot++, playerHead);
-            }
-            // Dodaj osoby z dostępem
-            for (String accessor : accessors) {
-                if (slot >= 36) break;
-                ItemStack playerHead = createPlayerHead(accessor);
-                trustMenu.setItem(slot++, playerHead);
+                // Pomijamy uprawnienia i już dodanych graczy
+                if (manager.startsWith("[") && manager.endsWith("]")) continue;
+                
+                String playerName = manager.toLowerCase();
+                if (!addedPlayers.contains(playerName)) {
+                    addedPlayers.add(playerName);
+                    ItemStack playerHead = createPlayerHead(manager);
+                    trustMenu.setItem(slot++, playerHead);
+                }
             }
         }
 
@@ -151,23 +136,31 @@ public class ClaimMenu {
         ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         SkullMeta meta = (SkullMeta) head.getItemMeta();
         if (meta != null) {
+            String displayName;
+            
             // Sprawdzamy czy to nie jest uprawnienie
             if (playerName.startsWith("[") && playerName.endsWith("]")) {
-                meta.setDisplayName(ChatColor.YELLOW + playerName);
+                displayName = playerName;
             } else {
                 // Próbujemy znaleźć dokładny nick gracza
                 Player player = Bukkit.getPlayer(playerName);
-                String exactPlayerName = player != null ? player.getName() : 
-                    playerName.length() > 16 ? playerName.substring(0, 16) : playerName;
-                
-                try {
-                    meta.setOwningPlayer(Bukkit.getOfflinePlayer(exactPlayerName));
-                } catch (Exception e) {
-                    // Jeśli nie udało się ustawić właściciela, po prostu pomijamy
+                if (player != null) {
+                    // Gracz jest online
+                    displayName = player.getName();
+                    try {
+                        meta.setOwningPlayer(player);
+                    } catch (Exception ignored) {}
+                } else {
+                    // Próbujemy znaleźć offline gracza
+                    String cleanName = playerName.length() > 16 ? playerName.substring(0, 16) : playerName;
+                    displayName = cleanName;
+                    try {
+                        meta.setOwningPlayer(Bukkit.getOfflinePlayer(cleanName));
+                    } catch (Exception ignored) {}
                 }
-                meta.setDisplayName(ChatColor.YELLOW + exactPlayerName);
             }
             
+            meta.setDisplayName(ChatColor.YELLOW + displayName);
             List<String> lore = new ArrayList<>();
             lore.add(ChatColor.GRAY + "Kliknij PPM, aby usunąć");
             lore.add(ChatColor.GRAY + "tę osobę z zaufanych");

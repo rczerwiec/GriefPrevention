@@ -20,89 +20,92 @@ package me.ryanhamshire.GriefPrevention;
 
 import me.ryanhamshire.GriefPrevention.events.AccrueClaimBlocksEvent;
 import org.bukkit.entity.Player;
+import org.bukkit.Bukkit;
 
-import java.util.Collection;
-
-//FEATURE: give players claim blocks for playing, as long as they're not away from their computer
-
-//runs every 5 minutes in the main thread, grants blocks per hour / 12 to each online player who appears to be actively playing
+//FEATURE: give players claim blocks for playing
+//runs every 5 minutes in the main thread, grants blocks per hour / 12 to each online player
 class DeliverClaimBlocksTask implements Runnable
 {
-    private final Player player;
+    private static final int MINUTES_BETWEEN_DELIVERY = 5;
+    private Player player;
     private final GriefPrevention instance;
 
-    public DeliverClaimBlocksTask(Player player, GriefPrevention instance)
+    DeliverClaimBlocksTask(Player player)
     {
         this.player = player;
-        this.instance = instance;
+        this.instance = GriefPrevention.instance;
     }
 
     @Override
     public void run()
     {
-        //if no player specified, this task will create a player-specific task for each online player, scheduled one tick apart
-        if (this.player == null)
-        {
-            @SuppressWarnings("unchecked")
-            Collection<Player> players = (Collection<Player>) GriefPrevention.instance.getServer().getOnlinePlayers();
-
-            long i = 0;
-            for (Player onlinePlayer : players)
-            {
-                DeliverClaimBlocksTask newTask = new DeliverClaimBlocksTask(onlinePlayer, instance);
-                instance.getServer().getScheduler().scheduleSyncDelayedTask(instance, newTask, i++);
-            }
-
-            return; //tasks started for each player
+        // Sprawdzamy czy gracz jest online
+        if (!player.isOnline()) {
+            Bukkit.getLogger().info("[GriefPrevention] Gracz " + player.getName() + " jest offline, pomijam dodawanie bloków.");
+            return;
         }
 
-        //deliver claim blocks to the specified player
-        if (!this.player.isOnline())
-        {
-            return; //player is not online to receive claim blocks
+        if (!instance.claimsEnabledForWorld(player.getWorld())) {
+            Bukkit.getLogger().info("[GriefPrevention] Świat " + player.getWorld().getName() + " ma wyłączone działki.");
+            return;
         }
 
-        DataStore dataStore = instance.dataStore;
-        PlayerData playerData = dataStore.getPlayerData(player.getUniqueId());
+        PlayerData playerData = instance.dataStore.getPlayerData(player.getUniqueId());
 
-        // check if player is idle (considered idle if player's facing direction has not changed)
-        boolean isIdle = false;
-        isIdle = !(playerData.lastAfkCheckLocation == null || playerData.lastAfkCheckLocation.getDirection().equals(player.getLocation().getDirection()));
-
-        //remember current location for next time
-        playerData.lastAfkCheckLocation = player.getLocation();
+        // Sprawdzamy czy gracz osiągnął limit
+        int maxAccruedBlocks = playerData.getAccruedClaimBlocksLimit();
+        int currentBlocks = playerData.getAccruedClaimBlocks();
+        int bonusBlocks = playerData.getBonusClaimBlocks();
+        int groupBonus = instance.dataStore.getGroupBonusBlocks(player.getUniqueId());
+        int totalAvailable = currentBlocks + bonusBlocks + groupBonus;
+        
+        Bukkit.getLogger().info("[GriefPrevention] Statystyki dla " + player.getName() + ":");
+        Bukkit.getLogger().info("  - Aktualne bloki: " + currentBlocks);
+        Bukkit.getLogger().info("  - Bonusowe bloki: " + bonusBlocks);
+        Bukkit.getLogger().info("  - Bloki z grupy: " + groupBonus);
+        Bukkit.getLogger().info("  - Łącznie dostępne: " + totalAvailable);
+        Bukkit.getLogger().info("  - Limit bloków: " + maxAccruedBlocks);
+            
+        if (currentBlocks >= maxAccruedBlocks) {
+            Bukkit.getLogger().info("[GriefPrevention] Gracz " + player.getName() + " osiągnął limit bloków (" + maxAccruedBlocks + ")");
+            return;
+        }
 
         try
         {
-            //determine how fast blocks accrue for this player; can be modified by addons
-            int accrualRate = instance.config_claims_blocksAccruedPerHour_default;
+            // Obliczamy ile bloków na 5 minut (1/12 wartości godzinowej, zaokrąglamy w górę)
+            int blocksPerHour = instance.config_claims_blocksAccruedPerHour_default;
+            int blocksToAdd = (int)Math.ceil(blocksPerHour / 12.0);
+            
+            Bukkit.getLogger().info("[GriefPrevention] Próba dodania " + blocksToAdd + " bloków dla " + player.getName() + 
+                " (konfiguracja: " + blocksPerHour + " na godzinę, czyli " + blocksToAdd + " co 5 minut)");
 
-            //fire event for addons
-            AccrueClaimBlocksEvent event = new AccrueClaimBlocksEvent(player, accrualRate, isIdle);
+            // Przekazujemy wartość godzinową do eventu (event sam podzieli przez 6)
+            AccrueClaimBlocksEvent event = new AccrueClaimBlocksEvent(player, blocksPerHour, false);
             instance.getServer().getPluginManager().callEvent(event);
-            if (event.isCancelled())
-            {
-                //event is initialized as canceled if player is idle
-                if (event.isIdle())
-                    GriefPrevention.AddLogEntry(player.getName() + " wasn't active enough to accrue claim blocks this round.", CustomLogEntryTypes.Debug, true);
-                else
-                    GriefPrevention.AddLogEntry(player.getName() + " claim block delivery was canceled by another plugin.", CustomLogEntryTypes.Debug, true);
-                return; //event was cancelled
+            
+            if (event.isCancelled()) {
+                Bukkit.getLogger().info("[GriefPrevention] Gracz " + player.getName() + " nie otrzymał bloków - anulowane przez inny plugin");
+                return;
             }
 
-            //set actual accrual
-            accrualRate = event.getBlocksToAccrue();
-            if (accrualRate < 0) accrualRate = 0;
-            playerData.accrueBlocks(accrualRate);
-            GriefPrevention.AddLogEntry("Delivering " + event.getBlocksToAccrue() + " blocks to " + player.getName(), CustomLogEntryTypes.Debug, true);
+            // Event zwraca nam dokładnie tyle bloków ile chcieliśmy dodać
+            blocksToAdd = event.getBlocksToAccrue();
+            if (blocksToAdd <= 0) {
+                Bukkit.getLogger().info("[GriefPrevention] Nie dodano bloków - ilość <= 0");
+                return;
+            }
 
-            //intentionally NOT saving data here to reduce overall secondary storage access frequency
-            //many other operations will cause this player's data to save, including his eventual logout
-            //dataStore.savePlayerData(player.getUniqueIdentifier(), playerData);
+            // Dodajemy bloki
+            playerData.accrueBlocks(blocksToAdd);
+                
+            int newTotal = playerData.getAccruedClaimBlocks();
+            Bukkit.getLogger().info("[GriefPrevention] Dodano " + blocksToAdd + " bloków dla " + player.getName() + 
+                " (obecnie ma: " + newTotal + "/" + maxAccruedBlocks + ")");
         }
         catch (Exception e)
         {
-            GriefPrevention.AddLogEntry("Problem delivering claim blocks to player " + player.getName() + ":");
+            Bukkit.getLogger().severe("[GriefPrevention] Błąd podczas dodawania bloków dla " + player.getName() + ": " + e.getMessage());
             e.printStackTrace();
         }
     }

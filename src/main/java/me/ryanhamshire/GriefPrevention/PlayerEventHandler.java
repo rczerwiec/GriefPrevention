@@ -632,6 +632,15 @@ class PlayerEventHandler implements Listener
         playerData.lastSpawn = now;
         this.lastLoginThisServerSessionMap.put(playerID, nowDate);
 
+        // Ustawiamy timer dla dodawania bloków co 5 minut
+        DeliverClaimBlocksTask claimBlocksTask = new DeliverClaimBlocksTask(player);
+        Bukkit.getScheduler().runTaskTimer(instance, () -> {
+            claimBlocksTask.run();
+            int blocksPerHour = instance.config_claims_blocksAccruedPerHour_default;
+            int blocksToAdd = (int)Math.ceil(blocksPerHour / 12.0);
+            player.sendMessage(ChatColor.GREEN + "Otrzymałeś " + ChatColor.GOLD + blocksToAdd + ChatColor.GREEN + " bloków do swojej działki!");
+        }, 20L * 60 * 5, 20L * 60 * 5); // 20 ticks * 60 seconds * 5 minutes
+
         //if newish, prevent chat until he's moved a bit to prove he's not a bot
         if (GriefPrevention.isNewToServer(player) && !player.hasPermission("griefprevention.premovementchat"))
         {

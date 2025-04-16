@@ -432,12 +432,25 @@ public abstract class DataStore
     //adds a claim to the datastore, making it an effective claim
     synchronized void addClaim(Claim newClaim, boolean writeToStorage)
     {
+        //dodaj logi przed dodaniem działki
+        GriefPrevention.AddLogEntry("[DEBUG] Próba dodania działki ID: " + newClaim.id + 
+            " Owner: " + (newClaim.ownerID != null ? newClaim.ownerID.toString() : "admin") + 
+            " Location: " + newClaim.getLesserBoundaryCorner().toString(), CustomLogEntryTypes.Debug, true);
+
+        //sprawdź czy działka już istnieje
+        if(this.claims.stream().anyMatch(c -> c.id != null && c.id.equals(newClaim.id))) {
+            GriefPrevention.AddLogEntry("[WARNING] Próba dodania działki o ID " + newClaim.id + 
+                " która już istnieje w pamięci!", CustomLogEntryTypes.Warning, true);
+        }
+
         //subdivisions are added under their parent, not directly to the hash map for direct search
         if (newClaim.parent != null)
         {
             if (!newClaim.parent.children.contains(newClaim))
             {
                 newClaim.parent.children.add(newClaim);
+                GriefPrevention.AddLogEntry("[DEBUG] Dodano poddziałkę ID: " + newClaim.id + 
+                    " do rodzica ID: " + newClaim.parent.id, CustomLogEntryTypes.Debug, true);
             }
             newClaim.inDataStore = true;
             if (writeToStorage)
@@ -456,6 +469,9 @@ public abstract class DataStore
         }
         addToChunkClaimMap(newClaim);
 
+        GriefPrevention.AddLogEntry("[DEBUG] Dodano główną działkę ID: " + newClaim.id + 
+            " do pamięci. Total claims: " + this.claims.size(), CustomLogEntryTypes.Debug, true);
+
         newClaim.inDataStore = true;
 
         //except for administrative claims (which have no owner), update the owner's playerData with the new claim
@@ -463,6 +479,8 @@ public abstract class DataStore
         {
             PlayerData ownerData = this.getPlayerData(newClaim.ownerID);
             ownerData.getClaims().add(newClaim);
+            GriefPrevention.AddLogEntry("[DEBUG] Zaktualizowano dane gracza dla działki ID: " + newClaim.id, 
+                CustomLogEntryTypes.Debug, true);
         }
 
         //make sure the claim is saved to disk
@@ -575,9 +593,15 @@ public abstract class DataStore
     //saves any changes to a claim to secondary storage
     synchronized public void saveClaim(Claim claim)
     {
+        GriefPrevention.AddLogEntry("[DEBUG] Rozpoczęto zapis działki ID: " + claim.id + 
+            " do magazynu danych", CustomLogEntryTypes.Debug, true);
+
         assignClaimID(claim);
 
         this.writeClaimToStorage(claim);
+        
+        GriefPrevention.AddLogEntry("[DEBUG] Zakończono zapis działki ID: " + claim.id, 
+            CustomLogEntryTypes.Debug, true);
     }
 
     private void assignClaimID(Claim claim)
@@ -587,6 +611,8 @@ public abstract class DataStore
         {
             claim.id = this.nextClaimID;
             this.incrementNextClaimID();
+            GriefPrevention.AddLogEntry("[DEBUG] Przypisano nowe ID: " + claim.id + 
+                " dla działki", CustomLogEntryTypes.Debug, true);
         }
     }
 

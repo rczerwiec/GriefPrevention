@@ -5,6 +5,10 @@ import me.ryanhamshire.GriefPrevention.PlayerData;
 import me.ryanhamshire.GriefPrevention.util.BoundingBox;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -20,7 +24,7 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
     protected final Collection<BlockElement> elements = new HashSet<>();
 
     /**
-     * Construct a new {@code BlockBoundaryVisualization} with a step size of {@code 10} and a display radius of
+     * Construct a new {@code BlockBoundaryVisualization} with a step size of {@code 1} and a display radius of
      * {@code 75}.
      *
      * @param world the {@link World} being visualized in
@@ -29,7 +33,7 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
      */
     protected BlockBoundaryVisualization(@NotNull World world, @NotNull IntVector visualizeFrom, int height)
     {
-        this(world, visualizeFrom, height, 10, 75);
+        this(world, visualizeFrom, height, 1, 75);
     }
 
     /**
@@ -65,43 +69,40 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
     protected void draw(@NotNull Player player, @NotNull Boundary boundary)
     {
         BoundingBox area = boundary.bounds();
+        BoundingBox displayZone = displayZoneArea;
 
-        // Trim to area - allows for simplified display containment check later.
-        BoundingBox displayZone = displayZoneArea.intersection(area);
+        Consumer<IntVector> addCorner = addCornerElements(boundary);
+        Consumer<IntVector> addSide = addSideElements(boundary);
 
-        // If area is not inside display zone, there is nothing to display.
-        if (displayZone == null) return;
-
-        Consumer<@NotNull IntVector> addCorner = addCornerElements(boundary);
-        Consumer<@NotNull IntVector> addSide = addSideElements(boundary);
-
-        // North and south boundaries
-        for (int x = Math.max(area.getMinX() + step, displayZone.getMinX()); x < area.getMaxX() - step / 2 && x < displayZone.getMaxX(); x += step)
-        {
-            addDisplayed(displayZone, new IntVector(x, height, area.getMaxZ()), addSide);
-            addDisplayed(displayZone, new IntVector(x, height, area.getMinZ()), addSide);
-        }
-        // First and last step are always directly adjacent to corners
+        // Add sides first so corners can override them.
         if (area.getLength() > 2)
         {
-            addDisplayed(displayZone, new IntVector(area.getMinX() + 1, height, area.getMaxZ()), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMinX() + 1, height, area.getMinZ()), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMaxX() - 1, height, area.getMaxZ()), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMaxX() - 1, height, area.getMinZ()), addSide);
+            for (int x = area.getMinX() + 1; x < area.getMaxX(); x++)
+            {
+                if (x == area.getMinX() + 1 || x == area.getMaxX() - 1) {
+                    // Bloki przy rogach
+                    addDisplayed(displayZone, new IntVector(x, height, area.getMinZ()), addCornerAdjacentElements(boundary));
+                    addDisplayed(displayZone, new IntVector(x, height, area.getMaxZ()), addCornerAdjacentElements(boundary));
+                } else {
+                    addDisplayed(displayZone, new IntVector(x, height, area.getMinZ()), addSide);
+                    addDisplayed(displayZone, new IntVector(x, height, area.getMaxZ()), addSide);
+                }
+            }
         }
 
-        // East and west boundaries
-        for (int z = Math.max(area.getMinZ() + step, displayZone.getMinZ()); z < area.getMaxZ() - step / 2 && z < displayZone.getMaxZ(); z += step)
-        {
-            addDisplayed(displayZone, new IntVector(area.getMinX(), height, z), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMaxX(), height, z), addSide);
-        }
         if (area.getWidth() > 2)
         {
-            addDisplayed(displayZone, new IntVector(area.getMinX(), height, area.getMinZ() + 1), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMaxX(), height, area.getMinZ() + 1), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMinX(), height, area.getMaxZ() - 1), addSide);
-            addDisplayed(displayZone, new IntVector(area.getMaxX(), height, area.getMaxZ() - 1), addSide);
+            for (int z = area.getMinZ() + 1; z < area.getMaxZ(); z++)
+            {
+                if (z == area.getMinZ() + 1 || z == area.getMaxZ() - 1) {
+                    // Bloki przy rogach
+                    addDisplayed(displayZone, new IntVector(area.getMinX(), height, z), addCornerAdjacentElements(boundary));
+                    addDisplayed(displayZone, new IntVector(area.getMaxX(), height, z), addCornerAdjacentElements(boundary));
+                } else {
+                    addDisplayed(displayZone, new IntVector(area.getMinX(), height, z), addSide);
+                    addDisplayed(displayZone, new IntVector(area.getMaxX(), height, z), addSide);
+                }
+            }
         }
 
         // Add corners last to override any other elements created by very small claims.
@@ -109,6 +110,62 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
         addDisplayed(displayZone, new IntVector(area.getMaxX(), height, area.getMaxZ()), addCorner);
         addDisplayed(displayZone, new IntVector(area.getMinX(), height, area.getMinZ()), addCorner);
         addDisplayed(displayZone, new IntVector(area.getMaxX(), height, area.getMinZ()), addCorner);
+
+        // Add high corners and borders 30 blocks above the claim
+        int highY = height + 30;
+        
+        // Add high corners
+        addDisplayedForced(new IntVector(area.getMinX(), highY, area.getMaxZ()), addHighCornerElements(boundary));
+        addDisplayedForced(new IntVector(area.getMaxX(), highY, area.getMaxZ()), addHighCornerElements(boundary));
+        addDisplayedForced(new IntVector(area.getMinX(), highY, area.getMinZ()), addHighCornerElements(boundary));
+        addDisplayedForced(new IntVector(area.getMaxX(), highY, area.getMinZ()), addHighCornerElements(boundary));
+
+        // Add high borders
+        if (area.getLength() > 2)
+        {
+            for (int x = area.getMinX() + 1; x < area.getMaxX(); x++)
+            {
+                addDisplayedForced(new IntVector(x, highY, area.getMinZ()), addHighSideElements(boundary));
+                addDisplayedForced(new IntVector(x, highY, area.getMaxZ()), addHighSideElements(boundary));
+            }
+        }
+
+        if (area.getWidth() > 2)
+        {
+            for (int z = area.getMinZ() + 1; z < area.getMaxZ(); z++)
+            {
+                addDisplayedForced(new IntVector(area.getMinX(), highY, z), addHighSideElements(boundary));
+                addDisplayedForced(new IntVector(area.getMaxX(), highY, z), addHighSideElements(boundary));
+            }
+        }
+    }
+
+    protected Block getVisibleLocation(@NotNull IntVector vector)
+    {
+        Block block = vector.toBlock(world);
+        BlockFace direction = (isTransparent(block)) ? BlockFace.DOWN : BlockFace.UP;
+
+        while (block.getY() >= world.getMinHeight() &&
+                block.getY() < world.getMaxHeight() - 1 &&
+                (!isTransparent(block.getRelative(BlockFace.UP)) || isTransparent(block)))
+        {
+            block = block.getRelative(direction);
+        }
+
+        return block;
+    }
+
+    protected boolean isTransparent(@NotNull Block block)
+    {
+        Material blockMaterial = block.getType();
+
+        if (blockMaterial.isAir() || blockMaterial == Material.WATER || 
+            Tag.FENCES.isTagged(blockMaterial) || Tag.FENCE_GATES.isTagged(blockMaterial) ||
+            Tag.SIGNS.isTagged(blockMaterial) || Tag.WALLS.isTagged(blockMaterial) ||
+            Tag.WALL_SIGNS.isTagged(blockMaterial))
+            return true;
+
+        return block.getType().isTransparent();
     }
 
     /**
@@ -126,6 +183,14 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
      * @return the side element consumer
      */
     protected abstract @NotNull Consumer<@NotNull IntVector> addSideElements(@NotNull Boundary boundary);
+
+    /**
+     * Create a {@link Consumer} that adds elements adjacent to corners.
+     *
+     * @param boundary the {@code Boundary}
+     * @return the corner adjacent element consumer
+     */
+    protected abstract @NotNull Consumer<@NotNull IntVector> addCornerAdjacentElements(@NotNull Boundary boundary);
 
     protected boolean isAccessible(@NotNull BoundingBox displayZone, @NotNull IntVector coordinate)
     {
@@ -148,6 +213,32 @@ public abstract class BlockBoundaryVisualization extends BoundaryVisualization
             addElement.accept(coordinate);
         }
     }
+
+    /**
+     * Add a display element without checking display zone.
+     */
+    protected void addDisplayedForced(@NotNull IntVector coordinate, @NotNull Consumer<@NotNull IntVector> addElement)
+    {
+        if (coordinate.isChunkLoaded(world)) {
+            addElement.accept(coordinate);
+        }
+    }
+
+    /**
+     * Create a {@link Consumer} that adds high corner elements.
+     *
+     * @param boundary the {@code Boundary}
+     * @return the high corner element consumer
+     */
+    protected abstract @NotNull Consumer<@NotNull IntVector> addHighCornerElements(@NotNull Boundary boundary);
+
+    /**
+     * Create a {@link Consumer} that adds high side elements.
+     *
+     * @param boundary the {@code Boundary}
+     * @return the high side element consumer
+     */
+    protected abstract @NotNull Consumer<@NotNull IntVector> addHighSideElements(@NotNull Boundary boundary);
 
     @Override
     public void revert(@Nullable Player player)

@@ -25,5 +25,7 @@ public enum CustomLogEntryTypes
     AdminActivity,
     Debug,
     Exception,
-    MutedChat
+    MutedChat,
+    Error,
+    Warning
 }

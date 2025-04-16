@@ -26,6 +26,7 @@ import com.griefprevention.protection.ProtectionHelper;
 import me.ryanhamshire.GriefPrevention.DataStore.NoTransferException;
 import me.ryanhamshire.GriefPrevention.commands.CommandDispatcher;
 import me.ryanhamshire.GriefPrevention.commands.DzialkaCommand;
+import me.ryanhamshire.GriefPrevention.commands.ClaimFlyCommand;
 import me.ryanhamshire.GriefPrevention.events.SaveTrappedPlayerEvent;
 import me.ryanhamshire.GriefPrevention.events.TrustChangedEvent;
 import org.bukkit.BanList;
@@ -84,6 +85,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import me.ryanhamshire.GriefPrevention.gui.ClaimMenuListener;
+import me.ryanhamshire.GriefPrevention.commands.AbandonClaimCommand;
+import me.ryanhamshire.GriefPrevention.commands.TrustCommand;
 
 public class GriefPrevention extends JavaPlugin
 {
@@ -273,58 +276,124 @@ public class GriefPrevention extends JavaPlugin
     }
 
     //initializes well...   everything
+    @Override
     public void onEnable()
-    {
+    { 
         instance = this;
-
+        
+        //set up the logger
+        log = getLogger();
+        customLogger = new CustomLogger();
+        
+        AddLogEntry("[STARTUP] Inicjalizacja GriefPrevention. (c) 2012 Ryan Hamshire.", CustomLogEntryTypes.Debug, true);
+        
         this.loadConfig();
+        
+        AddLogEntry("[STARTUP] Ładowanie konfiguracji...", CustomLogEntryTypes.Debug, true);
+        
+        //load the config if it exists
+        FileConfiguration config = YamlConfiguration.loadConfiguration(new File(DataStore.configFilePath));
+        FileConfiguration outConfig = new YamlConfiguration();
+        outConfig.options().header("Default values are perfect for most servers.  If you want to customize and have a question, look for the answer here first: http://bit.ly/mcgpuser");
 
-        this.customLogger = new CustomLogger();
+        //load configuration settings (note defaults)
+        this.loadConfig(config, outConfig);
+        
+        AddLogEntry("[STARTUP] Konfiguracja załadowana. Inicjalizacja DataStore...", CustomLogEntryTypes.Debug, true);
 
         //when datastore initializes, it loads player and claim data, and posts some stats to the log
-        if (this.databaseUrl.length() > 0) {
-            try {
+        if (this.databaseUrl.length() > 0)
+        {
+            try
+            {
                 DatabaseDataStore databaseStore = new DatabaseDataStore(this.databaseUrl, this.databaseUserName, this.databasePassword);
 
-                if (FlatFileDataStore.hasData()) {
-                    GriefPrevention.AddLogEntry("There appears to be some data on the hard drive.  This may be recovered from\n" + FlatFileDataStore.getPlayerDataFolderPath());
+                if (FlatFileDataStore.hasData())
+                {
+                    AddLogEntry("[STARTUP] Znaleziono dane w plikach płaskich, migracja do bazy danych...", CustomLogEntryTypes.Debug, true);
+                    FlatFileDataStore flatFileStore = new FlatFileDataStore();
+                    this.dataStore = flatFileStore;
+                    flatFileStore.migrateData(databaseStore);
+                    AddLogEntry("Zakończono migrację danych do bazy danych.", CustomLogEntryTypes.Debug, true);
                 }
 
                 this.dataStore = databaseStore;
-            } catch (Exception e) {
-                GriefPrevention.AddLogEntry("Because there was a problem with the database, GriefPrevention will not function properly.  Either update the database config settings or delete those lines from the config.yml so that GriefPrevention can use the file system instead.");
-                e.printStackTrace();
-                this.getServer().getPluginManager().disablePlugin(this);
-                return;
             }
-        } else {
-            try {
-                this.dataStore = new FlatFileDataStore();
-                this.dataStore.initialize();
-            } catch (Exception e) {
-                GriefPrevention.AddLogEntry("Because there was a problem with the file system, GriefPrevention will not function properly.  Please delete the GriefPreventionData folder and all its contents.");
+            catch (Exception e)
+            {
+                AddLogEntry("[ERROR] Nie udało się połączyć z bazą danych. Szczegóły: " + e.getMessage(), CustomLogEntryTypes.Error, true);
                 e.printStackTrace();
-                this.getServer().getPluginManager().disablePlugin(this);
+                AddLogEntry("[STARTUP] Przełączanie na system plików płaskich...", CustomLogEntryTypes.Debug, true);
+                try
+                {
+                    this.dataStore = new FlatFileDataStore();
+                }
+                catch (Exception e1)
+                {
+                    e1.printStackTrace();
+                    AddLogEntry("[STARTUP] Błąd podczas inicjalizacji systemu przechowywania danych", CustomLogEntryTypes.Error, true);
+                    return;
+                }
+            }
+        }
+        else
+        {
+            AddLogEntry("[STARTUP] Konfiguracja wskazuje na system plików płaskich...", CustomLogEntryTypes.Debug, true);
+            try
+            {
+                this.dataStore = new FlatFileDataStore();
+            }
+            catch (Exception e)
+            {
+                e.printStackTrace();
+                AddLogEntry("[STARTUP] Błąd podczas inicjalizacji systemu przechowywania danych", CustomLogEntryTypes.Error, true);
                 return;
             }
         }
 
+        AddLogEntry("[STARTUP] Inicjalizacja systemu uprawnień...", CustomLogEntryTypes.Debug, true);
+        
+        //unless claim block accrual is disabled, start the recurring task to give players claim blocks
+        if (this.config_claims_blocksAccruedPerHour_default > 0)
+        {
+            DeliverClaimBlocksTask task = new DeliverClaimBlocksTask(null);
+            this.getServer().getScheduler().scheduleSyncRepeatingTask(this, task, 20L * 60 * 2, 20L * 60 * 5);
+        }
+
         //register for events
-        this.registerEvents();
+        PluginManager pluginManager = this.getServer().getPluginManager();
 
-        //register commands
-        this.setUpCommands();
+        //player events
+        PlayerEventHandler playerEventHandler = new PlayerEventHandler(this.dataStore, this);
+        pluginManager.registerEvents(playerEventHandler, this);
+        
+        //menu events
+        ClaimMenuListener menuListener = new ClaimMenuListener(this);
+        pluginManager.registerEvents(menuListener, this);
 
-        AddLogEntry("Boot finished.");
+        AddLogEntry("[STARTUP] Inicjalizacja zakończona pomyślnie!", CustomLogEntryTypes.Debug, true);
+
+        //register other commands
+        this.getCommand("abandonclaim").setExecutor(new AbandonClaimCommand(this));
+        this.getCommand("claimfly").setExecutor(new ClaimFlyCommand(this));
+        this.getCommand("trust").setExecutor(new TrustCommand(this));
+        this.getCommand("dzialka").setExecutor(new DzialkaCommand(this));
     }
 
     private void loadConfig()
     {
-        //load the config if it exists
-        FileConfiguration config = YamlConfiguration.loadConfiguration(new File(DataStore.configFilePath));
-        FileConfiguration outConfig = new YamlConfiguration();
-        outConfig.options().header("Default values are perfect for most servers.  If you want to customize and have a question, look for the answer here first: http://dev.bukkit.org/bukkit-plugins/grief-prevention/pages/setup-and-configuration/");
+        try {
+            FileConfiguration config = YamlConfiguration.loadConfiguration(new File(DataStore.configFilePath));
+            FileConfiguration outConfig = new YamlConfiguration();
+            loadConfig(config, outConfig);
+        } catch (Exception e) {
+            e.printStackTrace();
+            log.severe("Nie udało się załadować konfiguracji!");
+        }
+    }
 
+    private void loadConfig(FileConfiguration config, FileConfiguration outConfig)
+    {
         //read configuration settings (note defaults)
         int configVersion = config.getInt("GriefPrevention.ConfigVersion", 0);
 
@@ -857,16 +926,15 @@ public class GriefPrevention extends JavaPlugin
         }
     }
 
-    private void setUpCommands()
-    {
-        CommandDispatcher dispatcher = new CommandDispatcher();
-        // ... existing commands ...
-        
-        // Add new dzialka command
-        dispatcher.registerCommand(new DzialkaCommand(this));
-        
-        this.getCommand("dzialka").setExecutor(dispatcher);
-        // ... rest of existing code ...
+    private void setUpCommands() {
+        CommandDispatcher commandDispatcher = new CommandDispatcher();
+        commandDispatcher.registerCommand(new AbandonClaimCommand(this));
+        commandDispatcher.registerCommand(new ClaimFlyCommand(this));
+        commandDispatcher.registerCommand(new TrustCommand(this));
+
+        this.getCommand("abandonclaim").setExecutor(commandDispatcher);
+        this.getCommand("claimfly").setExecutor(commandDispatcher);
+        this.getCommand("trust").setExecutor(commandDispatcher);
     }
 
     //handles slash commands

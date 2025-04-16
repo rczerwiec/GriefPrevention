@@ -190,6 +190,10 @@ commands:
       usage: /<command> [gracz]
       permission: griefprevention.giveblocks
       aliases: [dodajbloki, addblocks]
+    claimfly:
+      description: Toggles flying in your claim.
+      usage: /<command>
+      permission: griefprevention.claimfly
 permissions:
     griefprevention.createclaims:
         description: Grants permission to create claims.
@@ -300,4 +304,7 @@ permissions:
         default: op
     griefprevention.premovementchat:
         description: Players with this permission can chat before moving.
+        default: false
+    griefprevention.claimfly:
+        description: Allows players to fly in their claims.
         default: false

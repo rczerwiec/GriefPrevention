@@ -43,30 +43,51 @@ public class FakeBlockVisualization extends BlockBoundaryVisualization
     {
         return addBlockElement(switch (boundary.type())
         {
-            case SUBDIVISION -> Material.IRON_BLOCK.createBlockData();
-            case INITIALIZE_ZONE -> Material.DIAMOND_BLOCK.createBlockData();
-            case CONFLICT_ZONE -> {
-                BlockData fakeData = Material.REDSTONE_ORE.createBlockData();
-                ((Lightable) fakeData).setLit(true);
-                yield fakeData;
-            }
-            default -> Material.GLOWSTONE.createBlockData();
+            case SUBDIVISION -> Material.VERDANT_FROGLIGHT.createBlockData();
+            case INITIALIZE_ZONE -> Material.VERDANT_FROGLIGHT.createBlockData();
+            case CONFLICT_ZONE -> Material.RED_STAINED_GLASS.createBlockData();
+            default -> Material.VERDANT_FROGLIGHT.createBlockData();
         });
     }
-
 
     @Override
     protected @NotNull Consumer<@NotNull IntVector> addSideElements(@NotNull Boundary boundary)
     {
+        if (boundary.bounds().getLength() <= 3 || boundary.bounds().getWidth() <= 3) {
+            return addBlockElement(Material.BLUE_GLAZED_TERRACOTTA.createBlockData());
+        }
+        
         // Determine BlockData from boundary type to cache for reuse in function.
         return addBlockElement(switch (boundary.type())
         {
-            case ADMIN_CLAIM -> Material.PUMPKIN.createBlockData();
-            case SUBDIVISION -> Material.WHITE_WOOL.createBlockData();
-            case INITIALIZE_ZONE -> Material.DIAMOND_BLOCK.createBlockData();
-            case CONFLICT_ZONE -> Material.NETHERRACK.createBlockData();
-            default -> Material.GOLD_BLOCK.createBlockData();
+            case ADMIN_CLAIM -> Material.BLUE_STAINED_GLASS.createBlockData();
+            case SUBDIVISION -> Material.BLUE_STAINED_GLASS.createBlockData();
+            case INITIALIZE_ZONE -> Material.BLUE_STAINED_GLASS.createBlockData();
+            case CONFLICT_ZONE -> Material.RED_STAINED_GLASS.createBlockData();
+            default -> Material.BLUE_STAINED_GLASS.createBlockData();
         });
+    }
+
+    @Override
+    protected @NotNull Consumer<@NotNull IntVector> addCornerAdjacentElements(@NotNull Boundary boundary)
+    {
+        return addBlockElement(Material.BLUE_GLAZED_TERRACOTTA.createBlockData());
+    }
+
+    @Override
+    protected @NotNull Consumer<@NotNull IntVector> addHighCornerElements(@NotNull Boundary boundary)
+    {
+        return vector -> {
+            elements.add(new FakeBlockElement(vector, Material.AIR.createBlockData(), Material.VERDANT_FROGLIGHT.createBlockData()));
+        };
+    }
+
+    @Override
+    protected @NotNull Consumer<@NotNull IntVector> addHighSideElements(@NotNull Boundary boundary)
+    {
+        return vector -> {
+            elements.add(new FakeBlockElement(vector, Material.AIR.createBlockData(), Material.GLASS.createBlockData()));
+        };
     }
 
     /**
@@ -78,9 +99,7 @@ public class FakeBlockVisualization extends BlockBoundaryVisualization
     private @NotNull Consumer<@NotNull IntVector> addBlockElement(@NotNull BlockData fakeData)
     {
         return vector -> {
-            // Obtain visible location from starting point.
             Block visibleLocation = getVisibleLocation(vector);
-            // Create an element using our fake data and the determined block's real data.
             elements.add(new FakeBlockElement(new IntVector(visibleLocation), visibleLocation.getBlockData(), fakeData));
         };
     }
@@ -91,7 +110,7 @@ public class FakeBlockVisualization extends BlockBoundaryVisualization
      * @param vector the {@link IntVector} of the display location
      * @return the located {@link Block}
      */
-    private Block getVisibleLocation(@NotNull IntVector vector)
+    protected @NotNull Block getVisibleLocation(@NotNull IntVector vector)
     {
         Block block = vector.toBlock(world);
         BlockFace direction = (isTransparent(block)) ? BlockFace.DOWN : BlockFace.UP;

@@ -398,17 +398,26 @@ public class FlatFileDataStore extends DataStore
 
     void loadClaimData(File[] files) throws Exception
     {
+        GriefPrevention.AddLogEntry("[DEBUG] Rozpoczęto ładowanie działek z plików. Liczba plików: " + files.length, 
+            CustomLogEntryTypes.Debug, true);
+
         ConcurrentHashMap<Claim, Long> orphans = new ConcurrentHashMap<>();
         for (int i = 0; i < files.length; i++)
         {
             if (files[i].isFile())  //avoids folders
             {
                 //skip any file starting with an underscore, to avoid special files not representing land claims
-                if (files[i].getName().startsWith("_")) continue;
+                if (files[i].getName().startsWith("_")) {
+                    GriefPrevention.AddLogEntry("[DEBUG] Pominięto plik specjalny: " + files[i].getName(), 
+                        CustomLogEntryTypes.Debug, true);
+                    continue;
+                }
 
                 //delete any which don't end in .yml
                 if (!files[i].getName().endsWith(".yml"))
                 {
+                    GriefPrevention.AddLogEntry("[DEBUG] Usunięto nieprawidłowy plik: " + files[i].getName(), 
+                        CustomLogEntryTypes.Debug, true);
                     files[i].delete();
                     continue;
                 }
@@ -419,60 +428,72 @@ public class FlatFileDataStore extends DataStore
                 try
                 {
                     claimID = Long.parseLong(files[i].getName().split("\\.")[0]);
+                    GriefPrevention.AddLogEntry("[DEBUG] Znaleziono plik działki ID: " + claimID, 
+                        CustomLogEntryTypes.Debug, true);
                 }
-
-                //because some older versions used a different file name pattern before claim IDs were introduced,
-                //those files need to be "converted" by renaming them to a unique ID
                 catch (Exception e)
                 {
                     claimID = this.nextClaimID;
                     this.incrementNextClaimID();
                     File newFile = new File(claimDataFolderPath + File.separator + String.valueOf(this.nextClaimID) + ".yml");
+                    GriefPrevention.AddLogEntry("[WARNING] Nieprawidłowa nazwa pliku działki. Zmieniono na: " + newFile.getName(), 
+                        CustomLogEntryTypes.Warning, true);
                     files[i].renameTo(newFile);
                     files[i] = newFile;
                 }
 
                 try
                 {
-                    ArrayList<Long> out_parentID = new ArrayList<>();  //hacky output parameter
+                    ArrayList<Long> out_parentID = new ArrayList<>();
                     Claim claim = this.loadClaim(files[i], out_parentID, claimID);
+                    
+                    if (claim != null) {
+                        GriefPrevention.AddLogEntry("[DEBUG] Załadowano działkę ID: " + claim.id + 
+                            " Owner: " + (claim.ownerID != null ? claim.ownerID.toString() : "admin") + 
+                            " ParentID: " + (out_parentID.isEmpty() ? "none" : out_parentID.get(0)), 
+                            CustomLogEntryTypes.Debug, true);
+                    }
+
                     if (out_parentID.size() == 0 || out_parentID.get(0) == -1)
                     {
+                        //top level claim
                         this.addClaim(claim, false);
                     }
                     else
                     {
+                        //subdivision
                         orphans.put(claim, out_parentID.get(0));
                     }
                 }
-
-                //if there's any problem with the file's content, log an error message and skip it
                 catch (Exception e)
                 {
-                    if (e.getMessage() != null && e.getMessage().contains("World not found"))
-                    {
-                        GriefPrevention.AddLogEntry("Failed to load a claim (ID:" + claimID + ") because its world isn't loaded (yet?).  If this is not expected, delete this claim.");
-                    }
-                    else
-                    {
-                        StringWriter errors = new StringWriter();
-                        e.printStackTrace(new PrintWriter(errors));
-                        GriefPrevention.AddLogEntry(files[i].getName() + " " + errors.toString(), CustomLogEntryTypes.Exception);
-                    }
+                    GriefPrevention.AddLogEntry("[ERROR] Błąd podczas ładowania działki z pliku: " + files[i].getName() + 
+                        " Error: " + e.getMessage(), CustomLogEntryTypes.Error, true);
+                    e.printStackTrace();
                 }
             }
         }
 
-        //link children to parents
-        for (Claim child : orphans.keySet())
+        //go through all the subdivisions we loaded and try to find their parent claims
+        for (Claim orphan : orphans.keySet())
         {
-            Claim parent = this.getClaim(orphans.get(child));
+            Claim parent = this.getClaim(orphans.get(orphan));
             if (parent != null)
             {
-                child.parent = parent;
-                this.addClaim(child, false);
+                orphan.parent = parent;
+                parent.children.add(orphan);
+                GriefPrevention.AddLogEntry("[DEBUG] Przypisano poddziałkę ID: " + orphan.id + 
+                    " do rodzica ID: " + parent.id, CustomLogEntryTypes.Debug, true);
+            }
+            else
+            {
+                GriefPrevention.AddLogEntry("[WARNING] Nie znaleziono rodzica ID: " + orphans.get(orphan) + 
+                    " dla poddziałki ID: " + orphan.id, CustomLogEntryTypes.Warning, true);
             }
         }
+
+        GriefPrevention.AddLogEntry("[DEBUG] Zakończono ładowanie działek. Łącznie załadowano: " + this.claims.size(), 
+            CustomLogEntryTypes.Debug, true);
     }
 
     Claim loadClaim(File file, ArrayList<Long> out_parentID, long claimID) throws IOException, InvalidConfigurationException, Exception

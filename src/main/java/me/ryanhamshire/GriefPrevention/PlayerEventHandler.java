@@ -39,25 +39,13 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Waterlogged;
-import org.bukkit.entity.AbstractHorse;
-import org.bukkit.entity.Animals;
-import org.bukkit.entity.Creature;
-import org.bukkit.entity.Donkey;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Fish;
-import org.bukkit.entity.Hanging;
-import org.bukkit.entity.Llama;
-import org.bukkit.entity.Mule;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Tameable;
-import org.bukkit.entity.Vehicle;
-import org.bukkit.entity.minecart.PoweredMinecart;
-import org.bukkit.entity.minecart.StorageMinecart;
+import org.bukkit.entity.*;
+import org.bukkit.entity.minecart.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
@@ -104,6 +92,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 
 class PlayerEventHandler implements Listener
 {
@@ -636,9 +627,10 @@ class PlayerEventHandler implements Listener
         DeliverClaimBlocksTask claimBlocksTask = new DeliverClaimBlocksTask(player);
         Bukkit.getScheduler().runTaskTimer(instance, () -> {
             claimBlocksTask.run();
+            // Pobieramy dokładną liczbę bloków z eventu
             int blocksPerHour = instance.config_claims_blocksAccruedPerHour_default;
-            int blocksToAdd = (int)Math.ceil(blocksPerHour / 12.0);
-            player.sendMessage(ChatColor.GREEN + "Otrzymałeś " + ChatColor.GOLD + blocksToAdd + ChatColor.GREEN + " bloków do swojej działki!");
+            int blocksToAdd = (int)Math.ceil(blocksPerHour / 12.0) + 1;
+            player.sendMessage(ChatColor.GRAY + ">> " + ChatColor.WHITE + "Otrzymałeś " + ChatColor.GOLD + "+" + blocksToAdd + ChatColor.WHITE + " bloki do działki " + ChatColor.GRAY + "<<");
         }, 20L * 60 * 5, 20L * 60 * 5); // 20 ticks * 60 seconds * 5 minutes
 
         //if newish, prevent chat until he's moved a bit to prove he's not a bot
@@ -1149,7 +1141,7 @@ class PlayerEventHandler implements Listener
         if (playerData.ignoreClaims) return;
 
         //don't allow container access during pvp combat
-        if ((entity instanceof StorageMinecart || entity instanceof PoweredMinecart))
+        if ((entity instanceof StorageMinecart || entity instanceof FurnaceMinecart))
         {
             if (playerData.inPvpCombat())
             {
@@ -1595,7 +1587,14 @@ class PlayerEventHandler implements Listener
             {
                 playerData.lastClaim = claim;
 
-                Supplier<String> noContainersReason = claim.checkPermission(player, ClaimPermission.Inventory, event);
+                Supplier<String> override = () -> {
+                    String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                    if (player.hasPermission("griefprevention.ignoreclaims"))
+                        message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                    return message;
+                };
+
+                Supplier<String> noContainersReason = claim.checkPermission(player, ClaimPermission.Inventory, event, override);
                 if (noContainersReason != null)
                 {
                     event.setCancelled(true);
@@ -1613,35 +1612,6 @@ class PlayerEventHandler implements Listener
             }
         }
 
-        //otherwise apply rules for doors and beds, if configured that way
-        else if (clickedBlock != null &&
-
-                (instance.config_claims_lockWoodenDoors && Tag.DOORS.isTagged(clickedBlockType) ||
-
-                instance.config_claims_preventButtonsSwitches && Tag.BEDS.isTagged(clickedBlockType) ||
-
-                instance.config_claims_lockTrapDoors && Tag.TRAPDOORS.isTagged(clickedBlockType) ||
-
-                instance.config_claims_lecternReadingRequiresAccessTrust && clickedBlockType == Material.LECTERN ||
-
-                instance.config_claims_lockFenceGates && Tag.FENCE_GATES.isTagged(clickedBlockType)))
-        {
-            if (playerData == null) playerData = this.dataStore.getPlayerData(player.getUniqueId());
-            Claim claim = this.dataStore.getClaimAt(clickedBlock.getLocation(), false, playerData.lastClaim);
-            if (claim != null)
-            {
-                playerData.lastClaim = claim;
-
-                Supplier<String> noAccessReason = claim.checkPermission(player, ClaimPermission.Access, event);
-                if (noAccessReason != null)
-                {
-                    event.setCancelled(true);
-                    GriefPrevention.sendMessage(player, TextMode.Err, noAccessReason.get());
-                    return;
-                }
-            }
-        }
-
         //otherwise apply rules for buttons and switches
         else if (clickedBlock != null && instance.config_claims_preventButtonsSwitches && (Tag.BUTTONS.isTagged(clickedBlockType) || clickedBlockType == Material.LEVER))
         {
@@ -1651,7 +1621,14 @@ class PlayerEventHandler implements Listener
             {
                 playerData.lastClaim = claim;
 
-                Supplier<String> noAccessReason = claim.checkPermission(player, ClaimPermission.Access, event);
+                Supplier<String> override = () -> {
+                    String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                    if (player.hasPermission("griefprevention.ignoreclaims"))
+                        message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                    return message;
+                };
+
+                Supplier<String> noAccessReason = claim.checkPermission(player, ClaimPermission.Access, event, override);
                 if (noAccessReason != null)
                 {
                     event.setCancelled(true);
@@ -2280,5 +2257,197 @@ class PlayerEventHandler implements Listener
         }
 
         return result;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPlayerMove(PlayerMoveEvent event) {
+        Player player = event.getPlayer();
+        
+        // Pozwól na latanie w trybie kreatywnym i spectatora
+        if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
+
+        // Sprawdź czy gracz się przemieścił (zmiana koordynatów X/Y/Z)
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (to == null || (from.getBlockX() == to.getBlockX() && 
+            from.getBlockY() == to.getBlockY() && 
+            from.getBlockZ() == to.getBlockZ())) {
+            return;
+        }
+
+        // Pobierz dane gracza i działkę
+        PlayerData playerData = this.dataStore.getPlayerData(player.getUniqueId());
+        Claim claim = this.dataStore.getClaimAt(to, false, playerData.lastClaim);
+        
+        // Jeśli gracz ma włączone latanie
+        if (player.getAllowFlight()) {
+            // Jeśli gracz nie jest na działce lub nie ma uprawnień, wyłącz latanie
+            if (claim == null || (claim.checkPermission(player, ClaimPermission.Build, null) != null && !claim.isAdminClaim())) {
+                player.setAllowFlight(false);
+                player.setFlying(false);
+                player.sendMessage(ChatColor.RED + "Możesz latać tylko na swojej działce.");
+            }
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    public void onBlockBreak(BlockBreakEvent breakEvent)
+    {
+        Player player = breakEvent.getPlayer();
+        Block block = breakEvent.getBlock();
+        
+        // Sprawdź czy gracz ma uprawnienia do niszczenia bloków
+        PlayerData playerData = this.dataStore.getPlayerData(player.getUniqueId());
+        Claim claim = this.dataStore.getClaimAt(block.getLocation(), false, playerData.lastClaim);
+        
+        if (claim != null)
+        {
+            playerData.lastClaim = claim;
+            
+            Supplier<String> override = () -> {
+                String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                if (player.hasPermission("griefprevention.ignoreclaims"))
+                    message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                return message;
+            };
+
+            Supplier<String> noBuildReason = claim.checkPermission(player, ClaimPermission.Build, breakEvent, override);
+            if (noBuildReason != null)
+            {
+                breakEvent.setCancelled(true);
+                GriefPrevention.sendMessage(player, TextMode.Err, noBuildReason.get());
+                return;
+            }
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    public void onBlockPlace(BlockPlaceEvent placeEvent)
+    {
+        Player player = placeEvent.getPlayer();
+        Block block = placeEvent.getBlock();
+        
+        // Sprawdź czy gracz ma uprawnienia do stawiania bloków
+        PlayerData playerData = this.dataStore.getPlayerData(player.getUniqueId());
+        Claim claim = this.dataStore.getClaimAt(block.getLocation(), false, playerData.lastClaim);
+        
+        if (claim != null)
+        {
+            playerData.lastClaim = claim;
+            
+            Supplier<String> override = () -> {
+                String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                if (player.hasPermission("griefprevention.ignoreclaims"))
+                    message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                return message;
+            };
+
+            Supplier<String> noBuildReason = claim.checkPermission(player, ClaimPermission.Build, placeEvent, override);
+            if (noBuildReason != null)
+            {
+                placeEvent.setCancelled(true);
+                GriefPrevention.sendMessage(player, TextMode.Err, noBuildReason.get());
+                return;
+            }
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    public void onPhysical(PlayerInteractEvent event) {
+        if (event.getAction() != Action.PHYSICAL) return;
+        
+        Block block = event.getClickedBlock();
+        if (block == null) return;
+
+        // Lista bloków które chcemy chronić przed deptaniem
+        Material type = block.getType();
+        if (type != Material.FARMLAND && 
+            type != Material.SOUL_SAND && 
+            !Tag.CROPS.isTagged(type)) return;
+
+        Player player = event.getPlayer();
+        PlayerData playerData = this.dataStore.getPlayerData(player.getUniqueId());
+        
+        // Sprawdź czy blok jest na czyjejś działce
+        Claim claim = this.dataStore.getClaimAt(block.getLocation(), false, playerData.lastClaim);
+        if (claim != null) {
+            playerData.lastClaim = claim;
+            
+            Supplier<String> override = () -> {
+                String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                if (player.hasPermission("griefprevention.ignoreclaims"))
+                    message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                return message;
+            };
+
+            Supplier<String> noBuildReason = claim.checkPermission(player, ClaimPermission.Build, event, override);
+            if (noBuildReason != null) {
+                event.setCancelled(true);
+                GriefPrevention.sendMessage(player, TextMode.Err, noBuildReason.get());
+                return;
+            }
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        Entity damaged = event.getEntity();
+        if (!(damaged instanceof LivingEntity)) return;
+        
+        Entity damager = event.getDamager();
+        final Player attacker;
+        
+        if (damager instanceof Player) {
+            attacker = (Player) damager;
+        } else if (damager instanceof Projectile) {
+            Projectile projectile = (Projectile) damager;
+            if (projectile.getShooter() instanceof Player) {
+                attacker = (Player) projectile.getShooter();
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+        
+        // Get claim at damaged entity's location
+        Claim claim = this.dataStore.getClaimAt(damaged.getLocation(), false, null);
+        if (claim == null) return;
+        
+        // Check if entity is tameable
+        if (damaged instanceof Tameable) {
+            Tameable tamed = (Tameable) damaged;
+            if (tamed.isTamed()) {
+                Supplier<String> override = () -> {
+                    String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+                    if (attacker.hasPermission("griefprevention.ignoreclaims"))
+                        message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+                    return message;
+                };
+                
+                Supplier<String> noContainersReason = claim.checkPermission(attacker, ClaimPermission.Inventory, event, override);
+                if (noContainersReason != null) {
+                    event.setCancelled(true);
+                    GriefPrevention.sendMessage(attacker, TextMode.Err, noContainersReason.get());
+                    return;
+                }
+            }
+        }
+        
+        // For all other mobs, check build permission
+        Supplier<String> override = () -> {
+            String message = instance.dataStore.getMessage(Messages.NoBuildPermission, claim.getOwnerName());
+            if (attacker.hasPermission("griefprevention.ignoreclaims"))
+                message += "  " + instance.dataStore.getMessage(Messages.IgnoreClaimsAdvertisement);
+            return message;
+        };
+        
+        Supplier<String> noBuildReason = claim.checkPermission(attacker, ClaimPermission.Build, event, override);
+        if (noBuildReason != null) {
+            event.setCancelled(true);
+            GriefPrevention.sendMessage(attacker, TextMode.Err, noBuildReason.get());
+        }
     }
 }
